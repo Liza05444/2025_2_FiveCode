@@ -1,3 +1,9 @@
 .idea
 cover
-backend/.env
+.env
+.DS_Store
+.vscode
+*.sh
+*.txt
+*.out
+backend-goose

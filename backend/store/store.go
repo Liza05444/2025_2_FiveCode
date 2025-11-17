@@ -1,208 +1,138 @@
 package store
 
 import (
-	"backend/models"
-	namederrors "backend/named_errors"
+	"backend/config"
+	"backend/logger"
+	"context"
+	"database/sql"
+	"errors"
 	"fmt"
-	"sync"
+	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Store struct {
-	Mu           sync.RWMutex
-	Users        map[uint64]*models.User
-	UsersByEmail map[string]uint64
-	Notes        map[uint64]*models.Note
-	sessions     map[string]uint64
-
-	nextUserID uint64
+	Minio    *MinioStorage
+	Postgres *PostgresDB
+	Redis    *RedisDB
 }
 
-func (s *Store) InitFillStore() error {
-	_, err := s.CreateUser("user@example.com", "password")
+func (s *Store) InitRedis(conf *config.Config) error {
+	rdb, err := NewRedisDB(
+		conf.Storages.Redis.Host,
+		conf.Storages.Redis.Port,
+		conf.Storages.Redis.Password,
+		conf.Storages.Redis.DB,
+	)
 	if err != nil {
-		return fmt.Errorf("init fill store: %w", err)
+		return fmt.Errorf("failed to init redis: %w", err)
 	}
 
-	notes := []*models.Note{
-		{
-			ID:        1,
-			OwnerID:   1,
-			Title:     "University note",
-			Text:      "Lecture notes for math and history",
-			Favourite: true,
-			Folder:    "University",
-		},
-		{
-			ID:        2,
-			OwnerID:   1,
-			Title:     "Project idea",
-			Text:      "Brainstorming app features and sketches",
-			Favourite: false,
-			Folder:    "University",
-		},
-		{
-			ID:        3,
-			OwnerID:   1,
-			Title:     "Shopping list",
-			Text:      "Milk, bread, eggs, and vegetables",
-			Favourite: false,
-			Folder:    "Personal",
-		},
-		{
-			ID:        4,
-			OwnerID:   1,
-			Title:     "Note №4",
-			Text:      "Random text of the note",
-			Favourite: false,
-			Folder:    "Personal",
-		},
+	s.Redis = rdb
+	return nil
+}
+
+func (s *Store) InitPostgres(conf *config.Config) error {
+	pg, err := NewPostgresDB(
+		conf.Storages.Db.Host,
+		conf.Storages.Db.Port,
+		conf.Storages.Db.User,
+		conf.Storages.Db.Password,
+		conf.Storages.Db.DBName,
+		conf.Storages.Db.SSLMode,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to init postgres: %w", err)
 	}
-	for _, note := range notes {
-		s.Notes[note.ID] = note
+
+	s.Postgres = pg
+	return nil
+}
+
+func (s *Store) InitMinioStorage(conf *config.Config) error {
+	minioStorage, err := NewMinioStorage(
+		conf.Storages.Minio.Endpoint,
+		conf.Storages.Minio.AccessKey,
+		conf.Storages.Minio.SecretKey,
+		conf.Storages.Minio.Secure,
+	)
+	if err != nil {
+		return fmt.Errorf("error to init Minio storage: %w", err)
 	}
+
+	s.Minio = minioStorage
+	return nil
+}
+
+func (s *Store) InitFillStore(ctx context.Context) error {
+	log := logger.FromContext(ctx)
+	email := "user@example.com"
+	password := "password"
+
+	var userID uint64
+	var exists bool
+	checkQuery := `SELECT id FROM "user" WHERE email = $1`
+	err := s.Postgres.DB.QueryRowContext(ctx, checkQuery, email).Scan(&userID)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		log.Info().Str("email", email).Msg("default user not found, creating...")
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+
+		username := strings.Split(email, "@")[0]
+		insertQuery := `
+            INSERT INTO "user" (email, password_hash, username)
+            VALUES ($1, $2, $3)
+            RETURNING id
+        `
+		err = s.Postgres.DB.QueryRowContext(ctx, insertQuery, email, string(hashedPassword), username).Scan(&userID)
+		if err != nil {
+			return fmt.Errorf("failed to create user in PostgreSQL: %w", err)
+		}
+		exists = false
+		log.Info().Uint64("user_id", userID).Msg("default user created in database")
+	} else if err != nil {
+		return fmt.Errorf("failed to check user existence: %w", err)
+	} else {
+		log.Info().Str("email", email).Msg("default user already exists in database")
+		exists = true
+	}
+
+	if !exists {
+		log.Info().Msg("creating default notes for new user")
+		notes := []struct {
+			Title     string
+			IsShared  bool
+			CreatedAt time.Time
+			UpdatedAt time.Time
+		}{
+			{"University Lectures", false, time.Now().Add(-30 * 24 * time.Hour), time.Now().Add(-5 * 24 * time.Hour)},
+			{"Project Ideas", true, time.Now().Add(-20 * 24 * time.Hour), time.Now().Add(-2 * 24 * time.Hour)},
+			{"Shopping List", false, time.Now().Add(-7 * 24 * time.Hour), time.Now().Add(-6 * time.Hour)},
+			{"Random Note", false, time.Now().Add(-10 * 24 * time.Hour), time.Now().Add(-8 * 24 * time.Hour)},
+		}
+
+		for _, note := range notes {
+			insertNoteQuery := `
+                INSERT INTO note (owner_id, title, is_archived, is_shared, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `
+			_, err = s.Postgres.DB.ExecContext(ctx, insertNoteQuery, userID, note.Title, false, note.IsShared, note.CreatedAt, note.UpdatedAt)
+			if err != nil {
+				return fmt.Errorf("failed to create note '%s': %w", note.Title, err)
+			}
+		}
+		log.Info().Int("count", len(notes)).Msg("default notes created")
+	}
+
+	log.Info().Msg("InitFillStore completed successfully")
 	return nil
 }
 
 func NewStore() *Store {
-	return &Store{
-		Users:        make(map[uint64]*models.User),
-		UsersByEmail: make(map[string]uint64),
-		Notes:        make(map[uint64]*models.Note),
-		sessions:     make(map[string]uint64),
-		nextUserID:   1,
-	}
-}
-
-func (s *Store) CreateDefaultNotes(userID uint64) {
-	notes := []*models.Note{
-		{
-			ID:        userID*1000 + 1,
-			OwnerID:   userID,
-			Title:     "Books to read",
-			Text:      "The Three Musketeers, Animal Farm, Angels and Demons",
-			Favourite: false,
-			Folder:    "Personal",
-		},
-		{
-			ID:        userID*1000 + 2,
-			OwnerID:   userID,
-			Title:     "Homework",
-			Text:      "Write an essay",
-			Favourite: false,
-			Folder:    "University",
-		},
-		{
-			ID:        userID*1000 + 3,
-			OwnerID:   userID,
-			Title:     "My wishes",
-			Text:      "I want to be a millionaire",
-			Favourite: true,
-			Folder:    "Personal",
-		},
-		{
-			ID:        userID*1000 + 4,
-			OwnerID:   userID,
-			Title:     "Films to watch",
-			Text:      "Harry Potter, The Lord of the Rings, Avatar",
-			Favourite: false,
-			Folder:    "Personal",
-		},
-	}
-	for _, note := range notes {
-		s.Notes[note.ID] = note
-	}
-}
-
-func (s *Store) CreateUser(email, password string) (*models.User, error) {
-	s.Mu.Lock()
-	defer s.Mu.Unlock()
-
-	if _, ok := s.UsersByEmail[email]; ok {
-		return nil, namederrors.ErrUserExists
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, fmt.Errorf("cannot hash password: %w", err)
-	}
-
-	user := &models.User{
-		ID:        s.nextUserID,
-		Email:     email,
-		Password:  string(hashedPassword),
-		CreatedAt: time.Now().UTC(),
-	}
-	s.Users[user.ID] = user
-	s.UsersByEmail[email] = user.ID
-	s.CreateDefaultNotes(user.ID)
-	s.nextUserID++
-
-	return user, nil
-}
-
-func (s *Store) AuthenticateUser(email, password string) (*models.User, error) {
-	s.Mu.RLock()
-	defer s.Mu.RUnlock()
-
-	userID, ok := s.UsersByEmail[email]
-	if !ok {
-		return nil, namederrors.ErrInvalidEmailOrPassword
-	}
-	user := s.Users[userID]
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return nil, namederrors.ErrInvalidEmailOrPassword
-	}
-
-	return user, nil
-}
-
-func (s *Store) CreateSession(userID uint64) string {
-	s.Mu.Lock()
-	defer s.Mu.Unlock()
-
-	sessionID := uuid.NewString()
-	s.sessions[sessionID] = userID
-
-	return sessionID
-}
-
-func (s *Store) DeleteSession(sessionID string) {
-	s.Mu.Lock()
-	defer s.Mu.Unlock()
-
-	delete(s.sessions, sessionID)
-}
-
-func (s *Store) GetUserBySession(sessionID string) (*models.User, bool) {
-	s.Mu.RLock()
-	defer s.Mu.RUnlock()
-
-	userID, ok := s.sessions[sessionID]
-	if !ok {
-		log.Info().Str("session_id", sessionID).Msg("session not found")
-		return nil, false
-	}
-	user, ok := s.Users[userID]
-
-	return user, ok
-}
-
-func (s *Store) ListNotes(ownerID uint64) []models.Note {
-	s.Mu.RLock()
-	defer s.Mu.RUnlock()
-
-	result := make([]models.Note, 0)
-	for _, note := range s.Notes {
-		if note.OwnerID == ownerID {
-			result = append(result, *note)
-		}
-	}
-
-	return result
+	return &Store{}
 }

@@ -1,7 +1,9 @@
 package apiutils
 
 import (
+	"bytes"
 	"encoding/json"
+	"github.com/spf13/viper"
 	"net/http"
 	"strings"
 
@@ -11,6 +13,12 @@ import (
 
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// НОВОЕ: Ошибка с кодом
+type ErrorResponseWithCode struct {
+	Error     string `json:"error"`
+	ErrorCode string `json:"error_code"`
 }
 
 type FieldError struct {
@@ -24,6 +32,13 @@ type ValidationErrors struct {
 
 func WriteError(w http.ResponseWriter, code int, errorText string) {
 	WriteJSON(w, code, ErrorResponse{Error: errorText})
+}
+
+func WriteErrorWithCode(w http.ResponseWriter, code int, errorText string, errorCode string) {
+	WriteJSON(w, code, ErrorResponseWithCode{
+		Error:     errorText,
+		ErrorCode: errorCode,
+	})
 }
 
 func WriteValidationErrors(w http.ResponseWriter, code int, errs []FieldError) {
@@ -62,4 +77,64 @@ func WriteJSON(w http.ResponseWriter, code int, v interface{}) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Error().Err(err).Msg("json encode error")
 	}
+}
+
+func GetBool(val *bool, def bool) bool {
+	if val != nil {
+		return *val
+	}
+	return def
+}
+
+func GetString(val *string, def string) string {
+	if val != nil {
+		return *val
+	}
+	return def
+}
+
+func GetInt(val *int, def int) int {
+	if val != nil {
+		return *val
+	}
+	return def
+}
+
+func StrictUnmarshal(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+func TransformMinioURL(internalURL string) string {
+	if internalURL == "" {
+		return ""
+	}
+
+	internalEndpoint := viper.GetString("MINIO_ENDPOINT")
+	publicEndpoint := viper.GetString("MINIO_PUBLIC_ENDPOINT")
+
+	if internalEndpoint == "" || publicEndpoint == "" {
+		return internalURL
+	}
+
+	url := internalURL
+
+	normalizedInternal := strings.Replace(internalEndpoint, "http://", "", 1)
+	normalizedInternal = strings.Replace(normalizedInternal, "https://", "", 1)
+
+	normalizedPublic := strings.Replace(publicEndpoint, "http://", "", 1)
+	normalizedPublic = strings.Replace(normalizedPublic, "https://", "", 1)
+
+	url = strings.Replace(url, normalizedInternal, normalizedPublic, 1)
+
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		if strings.HasPrefix(publicEndpoint, "https://") {
+			url = "https://" + url
+		} else {
+			url = "http://" + url
+		}
+	}
+
+	return url
 }

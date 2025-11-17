@@ -5,49 +5,40 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
-func TestWriteJSON(t *testing.T) {
-	tests := []struct {
-		name     string
-		code     int
-		data     interface{}
-		wantCode int
-	}{
-		{
-			name:     "successful response",
-			code:     http.StatusOK,
-			data:     map[string]string{"message": "success"},
-			wantCode: http.StatusOK,
-		},
-		{
-			name:     "error response",
-			code:     http.StatusBadRequest,
-			data:     map[string]string{"error": "invalid request"},
-			wantCode: http.StatusBadRequest,
-		},
-		{
-			name:     "user object",
-			code:     http.StatusCreated,
-			data:     map[string]interface{}{"id": 1, "email": "test@example.com"},
-			wantCode: http.StatusCreated,
-		},
-	}
+func TestWriteErrorAndJSON(t *testing.T) {
+    w := httptest.NewRecorder()
+    WriteError(w, http.StatusBadRequest, "oops")
+    if w.Result().StatusCode != http.StatusBadRequest {
+        t.Fatalf("expected 400 got %d", w.Result().StatusCode)
+    }
+    var out ErrorResponse
+    if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+        t.Fatalf("json decode: %v", err)
+    }
+    if out.Error != "oops" {
+        t.Fatalf("unexpected error text: %s", out.Error)
+    }
+}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
+func TestGetHelpersAndStrictUnmarshal(t *testing.T) {
+    b := true
+    if !GetBool(&b, false) { t.Fatalf("GetBool failed") }
+    s := "x"
+    if GetString(&s, "def") != "x" { t.Fatalf("GetString failed") }
+    i := 5
+    if GetInt(&i, 1) != 5 { t.Fatalf("GetInt failed") }
 
-			WriteJSON(w, test.code, test.data)
+    // StrictUnmarshal should error on unknown fields
+    type X struct { A int `json:"a"` }
+    data := []byte(`{"a":1,"b":2}`)
+    var x X
+    if err := StrictUnmarshal(data, &x); err == nil {
+        t.Fatalf("expected error from StrictUnmarshal with unknown fields")
+    }
 
-			require.Equal(t, test.wantCode, w.Code)
-			require.Equal(t, "application/json", w.Header().Get("Content-Type"))
-
-			var result map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &result)
-			require.NoError(t, err)
-		})
-	}
+    // parseGovalidatorError behaviour
+    f, m := parseGovalidatorError("field: message")
+    if f != "field" || m != "message" { t.Fatalf("parseGovalidatorError mismatch: %s %s", f, m) }
 }
