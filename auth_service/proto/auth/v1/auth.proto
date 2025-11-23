@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "backend/auth_service/pkg/auth/v1";
+
+import "google/protobuf/empty.proto";
+
+
+service Auth {
+  rpc CreateSession (CreateSessionRequest) returns (CreateSessionResponse) {}
+
+  rpc Logout(LogoutRequest) returns (google.protobuf.Empty) {}
+
+  rpc GetUserIDBySession(GetUserIDBySessionRequest) returns (GetUserIDBySessionResponse) {}
+
+  rpc GetCSRFToken(GetCSRFTokenRequest) returns (GetCSRFTokenResponse) {}
+}
+
+
+message CreateSessionRequest {
+  uint64 user_id = 1;
+}
+
+message CreateSessionResponse {
+  string session_id = 1;
+}
+
+message LogoutRequest {
+  string session_id = 1;
+}
+
+message GetUserIDBySessionRequest {
+  string session_id = 1;
+}
+message GetUserIDBySessionResponse {
+  bool is_valid = 1;
+  uint64 user_id = 2;
+}
+
+message GetCSRFTokenRequest {
+  string session_id = 1;
+}
+
+message GetCSRFTokenResponse {
+  string token = 1;
+}
