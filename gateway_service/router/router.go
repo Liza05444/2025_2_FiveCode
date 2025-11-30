@@ -9,8 +9,11 @@ import (
 	mw "backend/gateway_service/internal/middleware"
 	notesDelivery "backend/gateway_service/internal/notes/delivery"
 	userDelivery "backend/gateway_service/internal/user/delivery"
+	"backend/pkg/metrics"
+	"backend/gateway_service/internal/websocket"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 )
 
@@ -22,6 +25,7 @@ func NewRouter(
 	user *userDelivery.UserDelivery,
 	notes *notesDelivery.NotesDelivery,
 	files *fileDelivery.FileDelivery,
+	wsHandler *websocket.Handler,
 ) http.Handler {
 
 	r := mux.NewRouter()
@@ -54,6 +58,10 @@ func NewRouter(
 	notesRouter.HandleFunc("/notes/{note_id}/favorite", notes.AddFavorite).Methods("POST")
 	notesRouter.HandleFunc("/notes/{note_id}/favorite", notes.RemoveFavorite).Methods("DELETE")
 
+	wsRouter := api.PathPrefix("/ws").Subrouter()
+	wsRouter.Use(mw.AuthMiddleware(sessionValidator))
+	wsRouter.HandleFunc("/notes/{note_id}", wsHandler.HandleConnection).Methods("GET")
+
 	blocksRouter := api.PathPrefix("").Subrouter()
 	blocksRouter.Use(mw.AuthMiddleware(sessionValidator), mw.CSRFMiddleware(conf))
 
@@ -64,12 +72,26 @@ func NewRouter(
 	blocksRouter.HandleFunc("/blocks/{block_id}", notes.DeleteBlock).Methods("DELETE")
 	blocksRouter.HandleFunc("/blocks/{block_id}/position", notes.UpdateBlockPosition).Methods("PUT")
 
+	sharingRouter := api.PathPrefix("").Subrouter()
+	sharingRouter.Use(mw.AuthMiddleware(sessionValidator), mw.CSRFMiddleware(conf))
+
+	sharingRouter.HandleFunc("/notes/{note_id}/collaborators", notes.AddCollaborator).Methods("POST")
+	sharingRouter.HandleFunc("/notes/{note_id}/collaborators", notes.GetCollaborators).Methods("GET")
+	sharingRouter.HandleFunc("/notes/{note_id}/collaborators/{permission_id}", notes.UpdateCollaboratorRole).Methods("PATCH")
+	sharingRouter.HandleFunc("/notes/{note_id}/collaborators/{permission_id}", notes.RemoveCollaborator).Methods("DELETE")
+	sharingRouter.HandleFunc("/notes/{note_id}/public-access", notes.SetPublicAccess).Methods("PUT")
+	sharingRouter.HandleFunc("/notes/{note_id}/public-access", notes.GetPublicAccess).Methods("GET")
+	sharingRouter.HandleFunc("/notes/{note_id}/sharing", notes.GetSharingSettings).Methods("GET")
+	sharingRouter.HandleFunc("/notes/activate/{share_uuid}", notes.ActivateAccessByLink).Methods("POST")
+
 	filesRouter := api.PathPrefix("/files").Subrouter()
 	filesRouter.Use(mw.AuthMiddleware(sessionValidator), mw.CSRFMiddleware(conf))
 
 	filesRouter.HandleFunc("/upload", files.UploadFile).Methods("POST")
 	filesRouter.HandleFunc("/{file_id}", files.GetFile).Methods("GET")
 	filesRouter.HandleFunc("/{file_id}", files.DeleteFile).Methods("DELETE")
+
+	r.Handle("/metrics", promhttp.HandlerFor(metrics.Registry(), promhttp.HandlerOpts{})).Methods("GET")
 
 	return mw.CORS(r, conf)
 }

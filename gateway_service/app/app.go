@@ -2,6 +2,7 @@ package app
 
 import (
 	"backend/gateway_service/internal/config"
+	"backend/gateway_service/internal/websocket"
 	"backend/gateway_service/logger"
 	"backend/gateway_service/router"
 	"backend/pkg/store"
@@ -31,6 +32,7 @@ import (
 	authPB "backend/auth_service/pkg/auth/v1"
 	blockPB "backend/notes_service/pkg/block/v1"
 	notePB "backend/notes_service/pkg/note/v1"
+	sharePB "backend/notes_service/pkg/sharing/v1"
 	userPB "backend/user_service/pkg/user/v1"
 
 	"github.com/rs/zerolog"
@@ -49,6 +51,8 @@ type App struct {
 	NotesConn *grpc.ClientConn
 
 	Handler http.Handler
+
+	WsHub *websocket.Hub
 
 	closers []io.Closer
 }
@@ -74,6 +78,7 @@ func NewApp() *App {
 	}
 
 	app.initDependencies()
+	app.initWebSocket()
 	app.initHTTPHandler()
 
 	return app
@@ -113,6 +118,16 @@ func (a *App) initDependencies() {
 	a.NotesConn = a.mustConnectGrpc("notes")
 }
 
+func (a *App) initWebSocket() {
+	a.Logger.Info().Msg("Initializing WebSocket Hub...")
+
+	a.WsHub = websocket.NewHub(&a.Logger)
+
+	go a.WsHub.Run()
+
+	a.Logger.Info().Msg("WebSocket Hub started successfully")
+}
+
 func (a *App) initHTTPHandler() {
 	a.Logger.Info().Msg("Initializing HTTP Handlers...")
 
@@ -121,17 +136,18 @@ func (a *App) initHTTPHandler() {
 	userClientGRPC := userPB.NewUserServiceClient(a.UserConn)
 	noteClientGRPC := notePB.NewNoteServiceClient(a.NotesConn)
 	blockClientGRPC := blockPB.NewBlockServiceClient(a.NotesConn)
+	shareClientGRPC := sharePB.NewSharingServiceClient(a.NotesConn)
 
 	// Repositories
 	gatewayAuthRepo := authRepo.NewAuthRepository(authClientGRPC)
 	gatewayUserRepo := userRepo.NewUserRepository(userClientGRPC)
-	gatewayNotesRepo := notesRepo.NewNotesRepository(noteClientGRPC, blockClientGRPC)
-	gatewayFileRepo := fileRepo.NewFileRepository(a.Store.Postgres.DB, a.Store.Minio.Client)
+	gatewayFileRepo := fileRepo.NewFileRepository(a.Store.Postgres.DB.GetSQLDB(), a.Store.Minio.Client)
+	gatewayNotesRepo := notesRepo.NewNotesRepository(noteClientGRPC, blockClientGRPC, shareClientGRPC, gatewayFileRepo)
 
 	// Usecases
 	gatewayAuthUC := authUC.NewAuthUsecase(gatewayAuthRepo, gatewayUserRepo)
 	gatewayUserUC := userUC.NewUserUsecase(gatewayUserRepo, gatewayAuthRepo)
-	gatewayNotesUC := notesUC.NewNotesUsecase(gatewayNotesRepo)
+	gatewayNotesUC := notesUC.NewNotesUsecase(gatewayNotesRepo, gatewayUserRepo)
 	gatewayFileUC := fileUC.NewFileUsecase(gatewayFileRepo)
 
 	// Handlers
@@ -139,12 +155,14 @@ func (a *App) initHTTPHandler() {
 
 	authHandler := authDelivery.NewAuthDelivery(gatewayAuthUC, sessionDuration)
 	userHandler := userDelivery.NewUserDelivery(gatewayUserUC)
-	notesHandler := notesDelivery.NewNotesDelivery(gatewayNotesUC)
+	notesHandler := notesDelivery.NewNotesDelivery(gatewayNotesUC, a.WsHub)
 	fileHandler := fileDelivery.NewFileDelivery(gatewayFileUC)
+
+	// WebSocket
+	wsHandler := websocket.NewHandler(a.WsHub, &a.Logger, shareClientGRPC)
 
 	sessionValidator := gatewayAuthRepo
 
-	// Router
 	a.Handler = router.NewRouter(
 		a.Config,
 		&a.Logger,
@@ -153,6 +171,7 @@ func (a *App) initHTTPHandler() {
 		userHandler,
 		notesHandler,
 		fileHandler,
+		wsHandler,
 	)
 }
 
@@ -176,7 +195,7 @@ func (a *App) mustConnectGrpc(serviceName string) *grpc.ClientConn {
 
 func (a *App) Close() error {
 	a.Logger.Info().Msg("Closing application resources...")
-	
+
 	var errs error
 	for _, closer := range a.closers {
 		if err := closer.Close(); err != nil {

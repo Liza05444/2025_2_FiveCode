@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -14,7 +15,7 @@ func TransformMinioURL(internalURL string) string {
 	internalEndpoint := viper.GetString("MINIO_ENDPOINT")
 	publicEndpoint := viper.GetString("MINIO_PUBLIC_ENDPOINT")
 
-	if internalEndpoint == "" || publicEndpoint == "" {
+	if internalEndpoint == "" && publicEndpoint == "" {
 		return internalURL
 	}
 
@@ -37,4 +38,19 @@ func TransformMinioURL(internalURL string) string {
 	}
 
 	return url
+}
+
+func TransformShareURL(shareUUID string) string {
+	if shareUUID == "" {
+		return ""
+	}
+
+	baseURL := viper.GetString("APP_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:3000"
+	}
+
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	return fmt.Sprintf("%s/share/%s", baseURL, shareUUID)
 }

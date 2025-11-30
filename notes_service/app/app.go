@@ -9,15 +9,20 @@ import (
 	NoteRepo "backend/notes_service/notes/repository"
 	NoteUC "backend/notes_service/notes/usecase"
 	"backend/notes_service/server"
+	ShareRepo "backend/notes_service/sharing/repository"
+	ShareUC "backend/notes_service/sharing/usecase"
 	"backend/pkg/interceptors"
+	"backend/pkg/metrics"
 	"backend/pkg/store"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
@@ -56,6 +61,7 @@ func NewApp() *App {
 
 	app.initDependencies()
 	app.initGRPCServer()
+	app.initMetrics()
 
 	return app
 }
@@ -98,19 +104,42 @@ func (a *App) initGRPCServer() {
 	a.Lis = lis
 	a.closers = append(a.closers, lis)
 
-	interceptorOpt := grpc.UnaryInterceptor(
+	interceptorOpt := grpc.ChainUnaryInterceptor(
 		interceptors.LoggingInterceptor(a.Logger, logger.ToContext),
+		interceptors.MetricsInterceptor(constants.NotesServiceName),
 	)
 
 	a.GRPCServer = grpc.NewServer(interceptorOpt)
 
 	notesRepo := NoteRepo.NewNotesRepository(a.Store.Postgres.DB)
 	blocksRepo := BlockRepo.NewBlocksRepository(a.Store.Postgres.DB)
+	shareRepo := ShareRepo.NewSharingRepository(a.Store.Postgres.DB)
 
-	notesUC := NoteUC.NewNoteUsecase(notesRepo)
-	blocksUC := BlockUC.NewBlocksUsecase(blocksRepo, notesRepo)
+	notesUC := NoteUC.NewNoteUsecase(notesRepo, shareRepo)
+	blocksUC := BlockUC.NewBlocksUsecase(blocksRepo, notesRepo, shareRepo)
+	shareUC := ShareUC.NewSharingUsecase(shareRepo, notesRepo)
 
-	server.RegisterServices(a.GRPCServer, notesUC, blocksUC)
+	server.RegisterServices(a.GRPCServer, notesUC, blocksUC, shareUC)
+}
+
+func (a *App) initMetrics() {
+	a.Logger.Info().Msg("Starting metrics server...")
+
+	metricsPort := a.Config.MetricsPort
+	if metricsPort == 0 {
+		a.Logger.Fatal().Msg("metrics_port is not set in config")
+	}
+
+	go func() {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", promhttp.HandlerFor(metrics.Registry(), promhttp.HandlerOpts{}))
+
+		metricsAddr := fmt.Sprintf(":%d", metricsPort)
+		a.Logger.Info().Str("addr", metricsAddr).Msg("Metrics server is running")
+		if err := http.ListenAndServe(metricsAddr, metricsMux); err != nil {
+			a.Logger.Error().Err(err).Msg("metrics server failed")
+		}
+	}()
 }
 
 func (a *App) Run() {

@@ -6,6 +6,7 @@ import (
 	"backend/user_service/logger"
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -15,8 +16,8 @@ import (
 type UserRepository interface {
 	CreateUser(ctx context.Context, email, passwordHash, username string) (uint64, error)
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
-	UpdateUser(ctx context.Context, userID uint64, username *string, password *string, avatarFileID *uint64) (*models.User, error)
 	GetUserByID(ctx context.Context, userID uint64) (*models.User, error)
+	UpdateUser(ctx context.Context, userID uint64, username *string, password *string, avatarFileID *uint64) (*models.User, error)
 	DeleteUser(ctx context.Context, userID uint64) error
 }
 
@@ -32,6 +33,13 @@ func NewUserUsecase(UserRepository UserRepository) *UserUsecase {
 
 func (uc *UserUsecase) UpdateUser(ctx context.Context, userID uint64, username *string, password *string, avatarFileID *uint64) (*models.User, error) {
 	log := logger.FromContext(ctx)
+
+	if username != nil {
+		if !verifyUsername(*username) {
+			log.Warn().Str("username", *username).Msg("invalid username format")
+			return nil, constants.ErrInvalidUsername
+		}
+	}
 
 	if password != nil {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*password), bcrypt.DefaultCost)
@@ -81,6 +89,15 @@ func (uc *UserUsecase) CreateUser(ctx context.Context, email, password, username
 
 	if username == "" {
 		username = strings.Split(email, "@")[0]
+		username = strings.Split(username, ".")[0]
+		if !verifyUsername(username) {
+			username = constants.DefaultUsername
+		}
+	}
+
+	if !verifyUsername(username) {
+		log.Warn().Str("username", username).Msg("invalid username format")
+		return nil, constants.ErrInvalidUsername
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -111,4 +128,27 @@ func (uc *UserUsecase) VerifyUser(ctx context.Context, email, password string) (
 	user.Password = ""
 
 	return user, nil
+}
+
+func (uc *UserUsecase) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	log := logger.FromContext(ctx)
+
+	user, err := uc.Repository.GetUserByEmail(ctx, email)
+	if err != nil {
+		log.Error().Err(err).Str("email", email).Msg("failed to get user by email from repository")
+		return nil, fmt.Errorf("failed to get user by email: %w", err)
+	}
+
+	user.Password = ""
+
+	return user, nil
+}
+
+var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
+func verifyUsername(username string) bool {
+	if len(username) < 1 || len(username) > 40 || !usernameRegex.MatchString(username) {
+		return false
+	}
+	return true
 }
