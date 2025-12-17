@@ -3,7 +3,7 @@ package usecase
 import (
 	"backend/gateway_service/internal/file/models"
 	"backend/gateway_service/internal/utils"
-	"backend/gateway_service/logger"
+	"backend/pkg/logger"
 	"bytes"
 	"context"
 	"fmt"
@@ -22,6 +22,8 @@ type FileRepository interface {
 	GetFileByID(ctx context.Context, fileID uint64) (*models.File, error)
 	DeleteFile(ctx context.Context, fileID uint64) error
 	DeleteFileFromMinIO(ctx context.Context, url string) error
+	GetIcons(ctx context.Context) ([]*models.Icon, error)
+	GetHeaders(ctx context.Context) ([]*models.Header, error)
 }
 
 type FileUsecase struct {
@@ -96,6 +98,48 @@ func (u *FileUsecase) GetFile(ctx context.Context, fileID uint64) (*models.File,
 	file.URL = utils.TransformMinioURL(file.URL)
 
 	return file, nil
+}
+
+func (u *FileUsecase) GetIcons(ctx context.Context) ([]models.Icon, error) {
+	log := logger.FromContext(ctx)
+
+	fileIcons, err := u.Repository.GetIcons(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to get icons from repository")
+		return nil, fmt.Errorf("failed to get icons: %w", err)
+	}
+
+	icons := make([]models.Icon, len(fileIcons))
+	for i, fi := range fileIcons {
+		icons[i] = models.Icon{
+			ID:   fi.ID,
+			Name: fi.Name,
+			URL:  utils.TransformMinioURL(fi.URL),
+		}
+	}
+
+	return icons, nil
+}
+
+func (u *FileUsecase) GetHeaders(ctx context.Context) ([]models.Header, error) {
+	log := logger.FromContext(ctx)
+
+	fileHeaders, err := u.Repository.GetHeaders(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to get headers from repository")
+		return nil, fmt.Errorf("failed to get headers: %w", err)
+	}
+
+	headers := make([]models.Header, len(fileHeaders))
+	for i, fh := range fileHeaders {
+		headers[i] = models.Header{
+			ID:   fh.ID,
+			Name: fh.Name,
+			URL:  utils.TransformMinioURL(fh.URL),
+		}
+	}
+
+	return headers, nil
 }
 
 func (u *FileUsecase) DeleteFile(ctx context.Context, fileID uint64) error {

@@ -5,12 +5,13 @@ import (
 
 	authDelivery "backend/gateway_service/internal/auth/delivery"
 	"backend/gateway_service/internal/config"
+	exportDelivery "backend/gateway_service/internal/export/delivery"
 	fileDelivery "backend/gateway_service/internal/file/delivery"
 	mw "backend/gateway_service/internal/middleware"
 	notesDelivery "backend/gateway_service/internal/notes/delivery"
 	userDelivery "backend/gateway_service/internal/user/delivery"
-	"backend/pkg/metrics"
 	"backend/gateway_service/internal/websocket"
+	"backend/pkg/metrics"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -25,6 +26,7 @@ func NewRouter(
 	user *userDelivery.UserDelivery,
 	notes *notesDelivery.NotesDelivery,
 	files *fileDelivery.FileDelivery,
+	export *exportDelivery.ExportDelivery,
 	wsHandler *websocket.Handler,
 ) http.Handler {
 
@@ -47,16 +49,26 @@ func NewRouter(
 	profile.HandleFunc("/profile", user.UpdateProfile).Methods("PUT")
 	profile.HandleFunc("/profile", user.DeleteProfile).Methods("DELETE")
 
+	api.HandleFunc("/icons", files.GetIcons).Methods("GET")
+	api.HandleFunc("/headers", files.GetHeaders).Methods("GET")
+
 	notesRouter := api.PathPrefix("").Subrouter()
 	notesRouter.Use(mw.AuthMiddleware(sessionValidator), mw.CSRFMiddleware(conf))
 
 	notesRouter.HandleFunc("/notes", notes.GetAllNotes).Methods("GET")
 	notesRouter.HandleFunc("/notes", notes.CreateNote).Methods("POST")
+	notesRouter.HandleFunc("/notes/search", notes.SearchNotes).Methods("POST")
 	notesRouter.HandleFunc("/notes/{note_id}", notes.GetNoteById).Methods("GET")
 	notesRouter.HandleFunc("/notes/{note_id}", notes.UpdateNote).Methods("PUT")
 	notesRouter.HandleFunc("/notes/{note_id}", notes.DeleteNote).Methods("DELETE")
 	notesRouter.HandleFunc("/notes/{note_id}/favorite", notes.AddFavorite).Methods("POST")
 	notesRouter.HandleFunc("/notes/{note_id}/favorite", notes.RemoveFavorite).Methods("DELETE")
+	notesRouter.HandleFunc("/notes/{note_id}/icons", notes.SetIcon).Methods("PUT")
+	notesRouter.HandleFunc("/notes/{note_id}/headers", notes.SetHeader).Methods("PUT")
+
+	exportRouter := api.PathPrefix("").Subrouter()
+	exportRouter.Use(mw.AuthMiddleware(sessionValidator), mw.CSRFMiddleware(conf))
+	exportRouter.HandleFunc("/notes/{note_id}/export/pdf", export.ExportNoteToPDF).Methods("GET")
 
 	wsRouter := api.PathPrefix("/ws").Subrouter()
 	wsRouter.Use(mw.AuthMiddleware(sessionValidator))

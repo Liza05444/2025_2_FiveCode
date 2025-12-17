@@ -44,3 +44,15 @@ func (u *NotesUsecase) AddFavorite(ctx context.Context, userID, noteID uint64) e
 func (u *NotesUsecase) RemoveFavorite(ctx context.Context, userID, noteID uint64) error {
 	return u.repo.RemoveFavorite(ctx, userID, noteID)
 }
+
+func (u *NotesUsecase) SearchNotes(ctx context.Context, userID uint64, query string) (*models.SearchNotesResponse, error) {
+	return u.repo.SearchNotes(ctx, userID, query)
+}
+
+func (u *NotesUsecase) SetIcon(ctx context.Context, userID, noteID, iconFileID uint64) (*models.Note, error) {
+	return u.repo.SetIcon(ctx, userID, noteID, iconFileID)
+}
+
+func (u *NotesUsecase) SetHeader(ctx context.Context, userID, noteID, headerFileID uint64) (*models.Note, error) {
+	return u.repo.SetHeader(ctx, userID, noteID, headerFileID)
+}

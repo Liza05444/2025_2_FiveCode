@@ -1,21 +1,27 @@
 package app
 
 import (
-	"backend/gateway_service/internal/config"
-	"backend/gateway_service/internal/websocket"
-	"backend/gateway_service/logger"
-	"backend/gateway_service/router"
-	"backend/pkg/store"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
 	"time"
 
+	"backend/gateway_service/internal/config"
+	"backend/gateway_service/internal/websocket"
+	"backend/gateway_service/router"
+	"backend/pkg/logger"
+	"backend/pkg/store"
+
 	authDelivery "backend/gateway_service/internal/auth/delivery"
 	authRepo "backend/gateway_service/internal/auth/repository"
 	authUC "backend/gateway_service/internal/auth/usecase"
+
+	exportClient "backend/gateway_service/internal/export/client"
+	exportDelivery "backend/gateway_service/internal/export/delivery"
+	exportUC "backend/gateway_service/internal/export/usecase"
 
 	fileDelivery "backend/gateway_service/internal/file/delivery"
 	fileRepo "backend/gateway_service/internal/file/repository"
@@ -150,6 +156,29 @@ func (a *App) initHTTPHandler() {
 	gatewayNotesUC := notesUC.NewNotesUsecase(gatewayNotesRepo, gatewayUserRepo)
 	gatewayFileUC := fileUC.NewFileUsecase(gatewayFileRepo)
 
+	// Export
+	gotenbergClient := exportClient.NewGotenbergClient(
+		a.Config.Gotenberg.URL,
+		a.Config.Gotenberg.Timeout,
+	)
+
+	htmlTemplate, err := template.ParseFiles("./internal/export/templates/note.html")
+	if err != nil {
+		a.Logger.Fatal().Err(err).Msg("failed to load export html template")
+	}
+
+	cssStyles, err := os.ReadFile("./internal/export/templates/style.css")
+	if err != nil {
+		a.Logger.Fatal().Err(err).Msg("failed to load export css styles")
+	}
+
+	gatewayExportUC := exportUC.NewExportUsecase(
+		gotenbergClient,
+		gatewayNotesRepo,
+		htmlTemplate,
+		cssStyles,
+	)
+
 	// Handlers
 	sessionDuration := time.Duration(a.Config.Cookie.SessionDuration) * time.Hour
 
@@ -157,6 +186,7 @@ func (a *App) initHTTPHandler() {
 	userHandler := userDelivery.NewUserDelivery(gatewayUserUC)
 	notesHandler := notesDelivery.NewNotesDelivery(gatewayNotesUC, a.WsHub)
 	fileHandler := fileDelivery.NewFileDelivery(gatewayFileUC)
+	exportHandler := exportDelivery.NewExportDelivery(gatewayExportUC)
 
 	// WebSocket
 	wsHandler := websocket.NewHandler(a.WsHub, &a.Logger, shareClientGRPC)
@@ -171,6 +201,7 @@ func (a *App) initHTTPHandler() {
 		userHandler,
 		notesHandler,
 		fileHandler,
+		exportHandler,
 		wsHandler,
 	)
 }
@@ -184,7 +215,7 @@ func (a *App) mustConnectGrpc(serviceName string) *grpc.ClientConn {
 
 	a.Logger.Info().Str("service", serviceName).Str("addr", addr).Msg("connecting to gRPC service")
 
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		a.Logger.Fatal().Err(err).Msgf("failed to connect to %s", serviceName)
 	}

@@ -23,6 +23,9 @@ type NoteUsecase interface {
 	AddFavorite(ctx context.Context, userID, noteID uint64) error
 	RemoveFavorite(ctx context.Context, userID, noteID uint64) error
 	GetNoteByShareUUID(ctx context.Context, shareUUID string) (*models.Note, error)
+	SearchNotes(ctx context.Context, userID uint64, query string) (*models.SearchNotesResponse, error)
+	SetIcon(ctx context.Context, userID, noteID, iconFileID uint64) (*models.Note, error)
+	SetHeader(ctx context.Context, userID, noteID, headerFileID uint64) (*models.Note, error)
 }
 
 type BlocksUsecase interface {
@@ -94,6 +97,9 @@ func noteModelToProto(note *models.Note) *notePB.Note {
 	}
 	if note.IconFileID != nil {
 		protoNote.IconFileId = note.IconFileID
+	}
+	if note.HeaderFileID != nil {
+		protoNote.HeaderFileId = note.HeaderFileID
 	}
 	if note.DeletedAt != nil {
 		protoNote.DeletedAt = timestamppb.New(*note.DeletedAt)
@@ -267,5 +273,39 @@ func noteAccessInfoModelToProto(accessInfo *models.NoteAccessInfo) *sharePB.Note
 		IsOwner:    accessInfo.IsOwner,
 		CanEdit:    accessInfo.CanEdit,
 		CanComment: accessInfo.Role == models.RoleCommenter || accessInfo.Role == models.RoleEditor,
+	}
+}
+
+func searchResultModelToProto(result *models.SearchResult) *notePB.SearchResult {
+	if result == nil {
+		return nil
+	}
+
+	return &notePB.SearchResult{
+		NoteId:           result.NoteID,
+		Title:            result.Title,
+		HighlightedTitle: result.HighlightedTitle,
+		ContentSnippet:   result.ContentSnippet,
+		Rank:             result.Rank,
+		UpdatedAt:        timestamppb.New(result.UpdatedAt),
+	}
+}
+
+func searchResponseModelToProto(response *models.SearchNotesResponse) *notePB.SearchNotesResponse {
+	if response == nil {
+		return &notePB.SearchNotesResponse{
+			Results: []*notePB.SearchResult{},
+			Count:   0,
+		}
+	}
+
+	protoResults := make([]*notePB.SearchResult, len(response.Results))
+	for i := range response.Results {
+		protoResults[i] = searchResultModelToProto(&response.Results[i])
+	}
+
+	return &notePB.SearchNotesResponse{
+		Results: protoResults,
+		Count:   int32(response.Count),
 	}
 }

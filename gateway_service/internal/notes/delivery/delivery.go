@@ -6,6 +6,7 @@ import (
 	"context"
 )
 
+//go:generate mockgen -source=delivery.go -destination=mock/mock_delivery.go -package=mock
 type NotesUsecase interface {
 	// Notes
 	GetAllNotes(ctx context.Context, userID uint64) ([]models.Note, error)
@@ -15,6 +16,9 @@ type NotesUsecase interface {
 	DeleteNote(ctx context.Context, userID, noteID uint64) error
 	AddFavorite(ctx context.Context, userID, noteID uint64) error
 	RemoveFavorite(ctx context.Context, userID, noteID uint64) error
+	SearchNotes(ctx context.Context, userID uint64, query string) (*models.SearchNotesResponse, error)
+	SetIcon(ctx context.Context, userID, noteID, iconFileID uint64) (*models.Note, error)
+	SetHeader(ctx context.Context, userID, noteID, headerFileID uint64) (*models.Note, error)
 
 	// Blocks
 	GetBlocks(ctx context.Context, userID, noteID uint64) ([]models.Block, error)

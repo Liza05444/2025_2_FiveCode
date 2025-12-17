@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+//go:generate mockgen -source=repository.go -destination=mock/mock_client.go -package=mock
 type FileRepository interface {
 	GetFileByID(ctx context.Context, fileID uint64) (*fileModels.File, error)
 }
@@ -27,6 +28,9 @@ type NoteClient interface {
 	DeleteNote(ctx context.Context, in *notePB.DeleteNoteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	AddFavorite(ctx context.Context, in *notePB.FavoriteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	RemoveFavorite(ctx context.Context, in *notePB.FavoriteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	SearchNotes(ctx context.Context, in *notePB.SearchNotesRequest, opts ...grpc.CallOption) (*notePB.SearchNotesResponse, error)
+	SetIcon(ctx context.Context, in *notePB.SetIconRequest, opts ...grpc.CallOption) (*notePB.Note, error)
+	SetHeader(ctx context.Context, in *notePB.SetHeaderRequest, opts ...grpc.CallOption) (*notePB.Note, error)
 }
 
 type BlockClient interface {
@@ -76,7 +80,10 @@ func (r *NotesRepository) GetAllNotes(ctx context.Context, userID uint64) ([]mod
 
 	notes := make([]models.Note, len(resp.Notes))
 	for i, pNote := range resp.Notes {
-		notes[i] = *utils.MapProtoToNote(pNote)
+		note := utils.MapProtoToNote(pNote)
+		r.enrichNoteWithIcon(ctx, note, pNote.IconFileId)
+		r.enrichNoteWithHeader(ctx, note, pNote.HeaderFileId)
+		notes[i] = *note
 	}
 	return notes, nil
 }
@@ -91,7 +98,10 @@ func (r *NotesRepository) CreateNote(ctx context.Context, userID uint64, parentN
 	if err != nil {
 		return nil, err
 	}
-	return utils.MapProtoToNote(resp), nil
+	note := utils.MapProtoToNote(resp)
+	r.enrichNoteWithIcon(ctx, note, resp.IconFileId)
+	r.enrichNoteWithHeader(ctx, note, resp.HeaderFileId)
+	return note, nil
 }
 
 func (r *NotesRepository) GetNoteById(ctx context.Context, userID, noteID uint64) (*models.Note, error) {
@@ -99,7 +109,10 @@ func (r *NotesRepository) GetNoteById(ctx context.Context, userID, noteID uint64
 	if err != nil {
 		return nil, err
 	}
-	return utils.MapProtoToNote(resp), nil
+	note := utils.MapProtoToNote(resp)
+	r.enrichNoteWithIcon(ctx, note, resp.IconFileId)
+	r.enrichNoteWithHeader(ctx, note, resp.HeaderFileId)
+	return note, nil
 }
 
 func (r *NotesRepository) UpdateNote(ctx context.Context, input *models.UpdateNoteInput) (*models.Note, error) {
@@ -118,7 +131,10 @@ func (r *NotesRepository) UpdateNote(ctx context.Context, input *models.UpdateNo
 	if err != nil {
 		return nil, err
 	}
-	return utils.MapProtoToNote(resp), nil
+	note := utils.MapProtoToNote(resp)
+	r.enrichNoteWithIcon(ctx, note, resp.IconFileId)
+	r.enrichNoteWithHeader(ctx, note, resp.HeaderFileId)
+	return note, nil
 }
 
 func (r *NotesRepository) DeleteNote(ctx context.Context, userID, noteID uint64) error {
@@ -134,6 +150,34 @@ func (r *NotesRepository) AddFavorite(ctx context.Context, userID, noteID uint64
 func (r *NotesRepository) RemoveFavorite(ctx context.Context, userID, noteID uint64) error {
 	_, err := r.noteClient.RemoveFavorite(ctx, &notePB.FavoriteRequest{UserId: userID, NoteId: noteID})
 	return err
+}
+
+func (r *NotesRepository) SearchNotes(ctx context.Context, userID uint64, query string) (*models.SearchNotesResponse, error) {
+	searchResult, err := r.noteClient.SearchNotes(ctx, &notePB.SearchNotesRequest{
+		UserId: userID,
+		Query:  query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return utils.MapProtoToSearchNotesResponse(searchResult), nil
+}
+
+func (r *NotesRepository) SetIcon(ctx context.Context, userID, noteID, iconFileID uint64) (*models.Note, error) {
+	resp, err := r.noteClient.SetIcon(ctx, &notePB.SetIconRequest{
+		UserId:     userID,
+		NoteId:     noteID,
+		IconFileId: iconFileID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	note := utils.MapProtoToNote(resp)
+	r.enrichNoteWithIcon(ctx, note, resp.IconFileId)
+	r.enrichNoteWithHeader(ctx, note, resp.HeaderFileId)
+	return note, nil
 }
 
 func (r *NotesRepository) GetBlocks(ctx context.Context, userID, noteID uint64) ([]models.Block, error) {
@@ -365,4 +409,56 @@ func (r *NotesRepository) enrichBlockWithFile(ctx context.Context, block *models
 			}
 		}
 	}
+}
+
+func (r *NotesRepository) enrichNoteWithIcon(ctx context.Context, note *models.Note, iconFileID *uint64) {
+	if iconFileID == nil {
+		return
+	}
+
+	file, err := r.fileRepo.GetFileByID(ctx, *iconFileID)
+	if err == nil {
+		urlParts := strings.Split(file.URL, "/")
+		iconName := urlParts[len(urlParts)-1]
+
+		note.Icon = &models.Icon{
+			ID:   file.ID,
+			Name: iconName,
+			URL:  utils.TransformMinioURL(file.URL),
+		}
+	}
+}
+
+func (r *NotesRepository) enrichNoteWithHeader(ctx context.Context, note *models.Note, headerFileID *uint64) {
+	if headerFileID == nil {
+		return
+	}
+
+	file, err := r.fileRepo.GetFileByID(ctx, *headerFileID)
+	if err == nil {
+		urlParts := strings.Split(file.URL, "/")
+		headerName := urlParts[len(urlParts)-1]
+
+		note.Header = &models.Header{
+			ID:   file.ID,
+			Name: headerName,
+			URL:  utils.TransformMinioURL(file.URL),
+		}
+	}
+}
+
+func (r *NotesRepository) SetHeader(ctx context.Context, userID, noteID, headerFileID uint64) (*models.Note, error) {
+	resp, err := r.noteClient.SetHeader(ctx, &notePB.SetHeaderRequest{
+		UserId:       userID,
+		NoteId:       noteID,
+		HeaderFileId: headerFileID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	note := utils.MapProtoToNote(resp)
+	r.enrichNoteWithIcon(ctx, note, resp.IconFileId)
+	r.enrichNoteWithHeader(ctx, note, resp.HeaderFileId)
+	return note, nil
 }

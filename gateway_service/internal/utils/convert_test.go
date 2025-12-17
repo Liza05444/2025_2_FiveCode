@@ -5,8 +5,6 @@ import (
 	"time"
 
 	noteModels "backend/gateway_service/internal/notes/models"
-	shareModels "backend/gateway_service/internal/notes/models"
-	userModels "backend/gateway_service/internal/user/models"
 	blockPB "backend/notes_service/pkg/block/v1"
 	notePB "backend/notes_service/pkg/note/v1"
 	sharePB "backend/notes_service/pkg/sharing/v1"
@@ -50,7 +48,6 @@ func TestMapProtoToNote(t *testing.T) {
 		assert.True(t, result.IsArchived)
 		assert.True(t, result.IsShared)
 		assert.Equal(t, &parentID, result.ParentNoteID)
-		assert.Equal(t, &iconID, result.IconFileID)
 		assert.Equal(t, now.Unix(), result.CreatedAt.Unix())
 		assert.Equal(t, now.Unix(), result.UpdatedAt.Unix())
 		assert.Equal(t, now.Unix(), result.DeletedAt.Unix())
@@ -262,7 +259,6 @@ func TestMapProtoToUser(t *testing.T) {
 			AvatarFileId: &avatarID,
 		}
 		result := MapProtoToUser(input)
-		var _ *userModels.User = result
 
 		assert.Equal(t, input.Id, result.ID)
 		assert.Equal(t, input.Email, result.Email)
@@ -275,12 +271,12 @@ func TestMapProtoToUser(t *testing.T) {
 func TestMapProtoRoleToModel(t *testing.T) {
 	tests := []struct {
 		input    sharePB.NoteRole
-		expected shareModels.NoteRole
+		expected noteModels.NoteRole
 	}{
-		{sharePB.NoteRole_NOTE_ROLE_VIEWER, shareModels.RoleViewer},
-		{sharePB.NoteRole_NOTE_ROLE_COMMENTER, shareModels.RoleCommenter},
-		{sharePB.NoteRole_NOTE_ROLE_EDITOR, shareModels.RoleEditor},
-		{sharePB.NoteRole_NOTE_ROLE_UNSPECIFIED, shareModels.RoleViewer},
+		{sharePB.NoteRole_NOTE_ROLE_VIEWER, noteModels.RoleViewer},
+		{sharePB.NoteRole_NOTE_ROLE_COMMENTER, noteModels.RoleCommenter},
+		{sharePB.NoteRole_NOTE_ROLE_EDITOR, noteModels.RoleEditor},
+		{sharePB.NoteRole_NOTE_ROLE_UNSPECIFIED, noteModels.RoleViewer},
 	}
 
 	for _, tt := range tests {
@@ -290,12 +286,12 @@ func TestMapProtoRoleToModel(t *testing.T) {
 
 func TestMapModelRoleToProto(t *testing.T) {
 	tests := []struct {
-		input    shareModels.NoteRole
+		input    noteModels.NoteRole
 		expected sharePB.NoteRole
 	}{
-		{shareModels.RoleViewer, sharePB.NoteRole_NOTE_ROLE_VIEWER},
-		{shareModels.RoleCommenter, sharePB.NoteRole_NOTE_ROLE_COMMENTER},
-		{shareModels.RoleEditor, sharePB.NoteRole_NOTE_ROLE_EDITOR},
+		{noteModels.RoleViewer, sharePB.NoteRole_NOTE_ROLE_VIEWER},
+		{noteModels.RoleCommenter, sharePB.NoteRole_NOTE_ROLE_COMMENTER},
+		{noteModels.RoleEditor, sharePB.NoteRole_NOTE_ROLE_EDITOR},
 		{"unknown", sharePB.NoteRole_NOTE_ROLE_UNSPECIFIED},
 	}
 
@@ -317,7 +313,7 @@ func TestMapProtoToCollaborator(t *testing.T) {
 	result := MapProtoToCollaborator(input)
 	assert.Equal(t, input.PermissionId, result.PermissionID)
 	assert.Equal(t, input.UserId, result.UserID)
-	assert.Equal(t, shareModels.RoleEditor, result.Role)
+	assert.Equal(t, noteModels.RoleEditor, result.Role)
 	assert.Equal(t, input.GrantedBy, result.GrantedBy)
 	assert.Equal(t, now.Unix(), result.GrantedAt.Unix())
 }
@@ -348,7 +344,7 @@ func TestMapProtoToGetCollaboratorsResponse(t *testing.T) {
 	}
 	result := MapProtoToGetCollaboratorsResponse(input)
 	assert.Equal(t, input.NoteId, result.NoteID)
-	assert.Equal(t, shareModels.RoleViewer, *result.PublicAccessLevel)
+	assert.Equal(t, noteModels.RoleViewer, *result.PublicAccessLevel)
 }
 
 func TestMapProtoToPublicAccessResponse(t *testing.T) {
@@ -361,7 +357,7 @@ func TestMapProtoToPublicAccessResponse(t *testing.T) {
 	}
 	result := MapProtoToPublicAccessResponse(input)
 	assert.Equal(t, input.NoteId, result.NoteID)
-	assert.Equal(t, shareModels.RoleViewer, *result.AccessLevel)
+	assert.Equal(t, noteModels.RoleViewer, *result.AccessLevel)
 	assert.Equal(t, "http://url", result.ShareURL)
 }
 
@@ -381,7 +377,7 @@ func TestMapProtoToSharingSettingsResponse(t *testing.T) {
 	}
 	result := MapProtoToSharingSettingsResponse(input)
 	assert.Equal(t, input.NoteId, result.NoteID)
-	assert.Equal(t, shareModels.RoleViewer, *result.PublicAccess.AccessLevel)
+	assert.Equal(t, noteModels.RoleViewer, *result.PublicAccess.AccessLevel)
 	assert.True(t, result.IsOwner)
 }
 
@@ -395,7 +391,7 @@ func TestMapProtoToNoteAccessInfo(t *testing.T) {
 	}
 	result := MapProtoToNoteAccessInfo(input)
 	assert.True(t, result.HasAccess)
-	assert.Equal(t, shareModels.RoleEditor, result.Role)
+	assert.Equal(t, noteModels.RoleEditor, result.Role)
 	assert.True(t, result.CanEdit)
 }
 

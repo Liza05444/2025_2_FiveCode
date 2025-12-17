@@ -3,7 +3,7 @@ package repository
 import (
 	"backend/gateway_service/internal/constants"
 	"backend/gateway_service/internal/file/models"
-	"backend/gateway_service/logger"
+	"backend/pkg/logger"
 	"bytes"
 	"context"
 	"database/sql"
@@ -187,6 +187,102 @@ func (r *FileRepository) DeleteFile(ctx context.Context, fileID uint64) error {
 	}
 
 	return nil
+}
+
+func (r *FileRepository) GetIcons(ctx context.Context) ([]*models.Icon, error) {
+	log := logger.FromContext(ctx)
+
+	query := `
+		SELECT id, url 
+		FROM file 
+		WHERE url LIKE '%/icons/%'
+		ORDER BY id
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to query icons")
+		return nil, fmt.Errorf("failed to query icons: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Error().Err(err).Msg("failed to close rows")
+		}
+	}()
+
+	var icons []*models.Icon
+	for rows.Next() {
+		var fileID uint64
+		var url string
+		if err := rows.Scan(&fileID, &url); err != nil {
+			log.Error().Err(err).Msg("failed to scan icon row")
+			return nil, fmt.Errorf("failed to scan icon: %w", err)
+		}
+
+		parts := strings.Split(url, "/")
+		name := parts[len(parts)-1]
+
+		icons = append(icons, &models.Icon{
+			ID:   fileID,
+			Name: name,
+			URL:  url,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("error iterating icon rows")
+		return nil, fmt.Errorf("failed to iterate icons: %w", err)
+	}
+
+	return icons, nil
+}
+
+func (r *FileRepository) GetHeaders(ctx context.Context) ([]*models.Header, error) {
+	log := logger.FromContext(ctx)
+
+	query := `
+		SELECT id, url 
+		FROM file 
+		WHERE url LIKE '%/headers/%'
+		ORDER BY id
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to query headers")
+		return nil, fmt.Errorf("failed to query headers: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Error().Err(err).Msg("failed to close rows")
+		}
+	}()
+
+	var headers []*models.Header
+	for rows.Next() {
+		var fileID uint64
+		var url string
+		if err := rows.Scan(&fileID, &url); err != nil {
+			log.Error().Err(err).Msg("failed to scan header row")
+			return nil, fmt.Errorf("failed to scan header: %w", err)
+		}
+
+		parts := strings.Split(url, "/")
+		name := parts[len(parts)-1]
+
+		headers = append(headers, &models.Header{
+			ID:   fileID,
+			Name: name,
+			URL:  url,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("error iterating header rows")
+		return nil, fmt.Errorf("failed to iterate headers: %w", err)
+	}
+
+	return headers, nil
 }
 
 func extractObjectNameFromURL(url string) (string, error) {

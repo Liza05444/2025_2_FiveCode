@@ -8,6 +8,7 @@ type Note struct {
 	ParentNoteID *uint64    `json:"parent_note_id,omitempty"`
 	Title        string     `json:"title"`
 	IconFileID   *uint64    `json:"icon_file_id,omitempty"`
+	HeaderFileID *uint64    `json:"header_file_id,omitempty"`
 	IsFavorite   bool       `json:"is_favorite"`
 	IsArchived   bool       `json:"is_archived"`
 	IsShared     bool       `json:"is_shared"`
@@ -15,4 +16,18 @@ type Note struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+}
+
+type SearchResult struct {
+	NoteID           uint64    `json:"note_id"`
+	Title            string    `json:"title"`
+	HighlightedTitle string    `json:"highlighted_title"`
+	ContentSnippet   string    `json:"content_snippet"`
+	Rank             float32   `json:"rank"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type SearchNotesResponse struct {
+	Results []SearchResult `json:"results"`
+	Count   int            `json:"count"`
 }

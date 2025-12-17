@@ -6,6 +6,7 @@ import (
 	"context"
 )
 
+//go:generate mockgen -source=usecase.go -destination=mock/mock_deps.go -package=mock
 type NotesRepository interface {
 	GetAllNotes(ctx context.Context, userID uint64) ([]models.Note, error)
 	CreateNote(ctx context.Context, userID uint64, parentNoteID *uint64) (*models.Note, error)
@@ -14,6 +15,9 @@ type NotesRepository interface {
 	DeleteNote(ctx context.Context, userID, noteID uint64) error
 	AddFavorite(ctx context.Context, userID, noteID uint64) error
 	RemoveFavorite(ctx context.Context, userID, noteID uint64) error
+	SearchNotes(ctx context.Context, userID uint64, query string) (*models.SearchNotesResponse, error)
+	SetIcon(ctx context.Context, userID, noteID, iconFileID uint64) (*models.Note, error)
+	SetHeader(ctx context.Context, userID, noteID, headerFileID uint64) (*models.Note, error)
 
 	GetBlocks(ctx context.Context, userID, noteID uint64) ([]models.Block, error)
 	GetBlock(ctx context.Context, userID, blockID uint64) (*models.Block, error)

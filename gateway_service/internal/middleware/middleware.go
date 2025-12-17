@@ -5,7 +5,7 @@ import (
 	"backend/gateway_service/internal/config"
 	"backend/gateway_service/internal/constants"
 	"backend/gateway_service/internal/utils"
-	"backend/gateway_service/logger"
+	"backend/pkg/logger"
 	"backend/pkg/metrics"
 	"bufio"
 	"bytes"
@@ -123,7 +123,10 @@ func AccessLogMiddleware(next http.Handler) http.Handler {
 		var bodyBytes []byte
 		if r.Header.Get("Upgrade") == "" {
 			bodyBytes, _ = io.ReadAll(r.Body)
-			r.Body.Close()
+			err := r.Body.Close()
+			if err != nil {
+				log.Error().Err(err).Msg("failed to close request body")
+			}
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
@@ -183,6 +186,7 @@ func AccessLogMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+//go:generate mockgen -source=middleware.go -destination=mock/mock_session.go -package=mock
 type SessionValidator interface {
 	ValidateSession(ctx context.Context, sessionID string) (uint64, error)
 }
