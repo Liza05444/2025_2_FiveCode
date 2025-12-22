@@ -246,6 +246,9 @@ func (d *NotesDelivery) notifyNoteChanged(ctx context.Context, noteID uint64, us
 		UpdatedAt: time.Now(),
 		Blocks:    blocks,
 		Title:     note.Title,
+
+		Icon:   note.Icon,
+		Header: note.Header,
 	}
 
 	data, err := json.Marshal(message)
@@ -340,11 +343,13 @@ func (d *NotesDelivery) SetIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.notifyNoteChanged(r.Context(), noteID, userID)
+
 	apiutils.WriteJSON(w, http.StatusOK, note)
 }
 
 type SetHeaderRequest struct {
-	HeaderFileID uint64 `json:"header_file_id"`
+	HeaderFileID uint64 `json:"header_id"`
 }
 
 func (d *NotesDelivery) SetHeader(w http.ResponseWriter, r *http.Request) {
@@ -383,6 +388,8 @@ func (d *NotesDelivery) SetHeader(w http.ResponseWriter, r *http.Request) {
 		apiutils.HandleGrpcError(w, err, log)
 		return
 	}
+
+	d.notifyNoteChanged(r.Context(), noteID, userID)
 
 	apiutils.WriteJSON(w, http.StatusOK, note)
 }
